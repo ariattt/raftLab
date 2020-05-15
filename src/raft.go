@@ -17,12 +17,13 @@ package raft
 //   in the same server.
 //
 
-import "sync"
-import "sync/atomic"
-import "../labrpc"
-import "math/rand"
-import "time"
-
+import (
+	"sync"
+	"sync/atomic"
+	"../labrpc"
+	"math/rand"
+	"time"
+)
 // import "bytes"
 // import "../labgob"
 
@@ -195,6 +196,12 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 }
 
+func (rf *Raft) HeartBeat(dummy_args *RequestVoteArgs, dummy_reply *RequestVoteReply) {
+	select{
+	case rf.hBeatCh <- true:
+	}
+}
+
 //
 // example code to send a RequestVote RPC to a server.
 // server is the index of the target server in rf.peers[].
@@ -253,6 +260,25 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	return
 }
 
+func (rf *Raft) broadcastHeartBeat(){
+	rf.Lock()
+	defer rf.Unlock()
+
+	n := len(rf.peers)
+	var replys = make([]RequestVoteReply, n)
+	var args RequestVoteArgs
+
+	for i:=0;i<n;i++{
+		if i == rf.me { continue }
+		ok := rf.peers[i].Call("Raft.HeartBeat", &args, &replys[i])
+		if !ok { DPrintf("HeartBeat fail at server (%d -> %d)", rf.me, i) }
+	}
+}
+
+func (rf *Raft) broadcastEntries(){
+
+}
+
 func (rf *Raft) broadcastRequestVote() {
 	var args RequestVoteArgs
 
@@ -268,7 +294,7 @@ func (rf *Raft) broadcastRequestVote() {
 		if rf.state != CANDIDATE { break }
 		if rf.me == i { continue }
 
-		var replys = make([]RequestVoteReply, 10)
+		var replys = make([]RequestVoteReply, n)
 		go rf.sendRequestVote(i, &args, &replys[i])
 	}
 }
@@ -288,10 +314,14 @@ func (rf *Raft) broadcastRequestVote() {
 // term. the third return value is true if this server believes it is
 // the leader.
 //
+// start will be called for multiple times
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
+	rf.Lock()
+	defer rf.Unlock()
+
 	index := -1
-	term := -1
-	isLeader := true
+	term := rf.currentTerm
+	isLeader := rf.state == LEADER
 
 	// Your code here (2B).
 
@@ -323,9 +353,12 @@ func (rf *Raft) killed() bool {
 func (rf *Raft) run() {
 	for{
 		switch rf.state{
+
 		case FOLLOWER:
 			select{
 			case <- rf.hBeatCh:
+				//prevents it from election
+				// DPrintf("follower %d heartbeats!", rf.me)
 			case <- rf.kill:
 				return
 			case <- time.After(time.Duration(rand.Intn(150)+250) * time.Millisecond):
@@ -333,6 +366,7 @@ func (rf *Raft) run() {
 				rf.state = CANDIDATE
 				rf.Unlock()
 			}
+
 		case CANDIDATE:
 			rf.Lock()
 			rf.votedFor = rf.me
@@ -341,10 +375,9 @@ func (rf *Raft) run() {
 			rf.persist()
 			rf.Unlock()
 
-			rf.broadcastRequestVote()
+			go rf.broadcastRequestVote()
 
 			select{
-
 			case <- rf.winElection:
 				rf.Lock()
 				
@@ -355,6 +388,11 @@ func (rf *Raft) run() {
 					rf.nextIndex[i] = rf.log[len(rf.log)-1].LogIndex + 1
 					rf.matchIndex[i] = 0
 				}
+
+				rf.Unlock()
+			case <- rf.hBeatCh:
+				rf.Lock()
+				rf.state = FOLLOWER
 				rf.Unlock()
 			case <- rf.kill:
 				return
@@ -363,6 +401,10 @@ func (rf *Raft) run() {
 
 
 		case LEADER:
+			go rf.broadcastHeartBeat()
+			go rf.broadcastEntries()
+			time.Sleep(time.Millisecond*100)
+
 		
 
 		}
