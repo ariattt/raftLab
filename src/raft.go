@@ -202,6 +202,10 @@ func (rf *Raft) HeartBeat(dummy_args *RequestVoteArgs, dummy_reply *RequestVoteR
 	}
 }
 
+func (rf *Raft) Entry(args *SendEntryArgs, reply *SendEntryReply) {
+	
+}
+
 //
 // example code to send a RequestVote RPC to a server.
 // server is the index of the target server in rf.peers[].
@@ -276,6 +280,59 @@ func (rf *Raft) broadcastHeartBeat(){
 }
 
 func (rf *Raft) broadcastEntries(){
+	rf.Lock()
+	defer rf.Unlock()
+
+	for i := range rf.peers{
+		if i == rf.me { continue }
+
+		nextIndex := rf.nextIndex[i]
+		if nextIndex > 0 {
+			args := &SendEntryArgs{
+				rf.currentTerm,
+				rf.me,
+				nextIndex - 1,
+				rf.log[nextIndex - 1].LogTerm,
+				[]LogEntry{},
+				rf.commitIndex,
+			}
+			reply := &SendEntryReply{}
+
+			go rf.sendEntry(i, args, reply)
+		}
+	}
+	
+	// determine commit or not
+}
+
+type SendEntryArgs struct {
+	TERM int
+	LEADERID int
+	PREVLOGINDEX int
+	PREVLOGTERM int
+	ENTRIES []LogEntry
+	LEADERCOMMIT int
+}
+
+type SendEntryReply struct {
+	TERM int
+	SUCCESS bool
+}
+
+func (rf *Raft) sendEntry(server int, args *SendEntryArgs, reply *SendEntryReply) {
+	ok := rf.peers[server].Call("Raft.Entry", args, reply)
+
+	if !ok { return }
+	//more return checks
+
+	rf.Lock()
+	defer rf.Unlock()
+
+	// log successfully appended
+	if reply.SUCCESS {
+		rf.nextIndex[server] += 1
+		rf.matchIndex[server] = rf.nextIndex[server] - 1
+	}
 
 }
 
