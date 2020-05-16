@@ -191,9 +191,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.VOTEGRANTED = true
 		rf.state = FOLLOWER
 		// DPrintf("%d votes aye for %d term %d!\n", rf.me, rf.votedFor, args.TERM)
-
 	}
-
 }
 
 func (rf *Raft) HeartBeat(dummy_args *RequestVoteArgs, dummy_reply *RequestVoteReply) {
@@ -203,7 +201,26 @@ func (rf *Raft) HeartBeat(dummy_args *RequestVoteArgs, dummy_reply *RequestVoteR
 }
 
 func (rf *Raft) Entry(args *SendEntryArgs, reply *SendEntryReply) {
-	
+	rf.Lock()
+	defer rf.Unlock()
+
+
+	reply.TERM = rf.currentTerm
+	reply.SUCCESS = false
+
+	if args.TERM < rf.currentTerm {
+		return
+	} else if args.TERM > rf.currentTerm{
+		rf.state = FOLLOWER
+		rf.votedFor = -1
+		rf.currentTerm = args.TERM
+	}
+
+	if args.PREVLOGINDEX > rf.log[len(rf.log)-1].LogIndex {
+		return
+	}
+
+
 }
 
 //
@@ -317,6 +334,7 @@ type SendEntryArgs struct {
 type SendEntryReply struct {
 	TERM int
 	SUCCESS bool
+	LASTENTRYINDEX int
 }
 
 func (rf *Raft) sendEntry(server int, args *SendEntryArgs, reply *SendEntryReply) {
