@@ -77,6 +77,14 @@ type Raft struct {
 
 }
 
+func (rf *Raft) GetLastLogPos() int{
+	return rf.log[len(rf.log) - 1].LogIndex
+}
+
+func (rf *Raft) GetLastLogTerm() int{
+	return rf.log[len(rf.log) - 1].LogTerm
+}
+
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
@@ -318,8 +326,28 @@ func (rf *Raft) broadcastEntries(){
 			go rf.sendEntry(i, args, reply)
 		}
 	}
-	
-	// determine commit or not
+
+		// determine commit or not
+	nextCommitIndex := rf.commitIndex + 1
+	for i := nextCommitIndex; i<=rf.GetLastLogPos(); i++{
+		cnt := 1
+		for j:=0; j<len(rf.peers);j++{
+			if j != rf.me &&
+				rf.log[i].LogTerm == rf.currentTerm &&
+				rf.matchIndex[i] >= i{
+					cnt += 1
+				}
+		}
+		if cnt * 2 <= len(rf.peers){
+			break;
+		}
+	}
+
+	DPrintf("log len %d nextt %d", len(rf.log), rf.log[0].LogIndex)
+	if nextCommitIndex > rf.commitIndex && 
+		rf.log[nextCommitIndex].LogTerm == rf.currentTerm{
+			rf.commitIndex = nextCommitIndex
+		}
 }
 
 type SendEntryArgs struct {
